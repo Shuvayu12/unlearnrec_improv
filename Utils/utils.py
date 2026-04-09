@@ -59,11 +59,12 @@ def cal_positive_pred_align_v2(srcUEmbs, tarUEmbs, srcIEmbs , tarIEmbs, align, t
 	srcpred = innerProduct(srcUEmbs, srcIEmbs) / temp
 	tarpred = innerProduct(tarUEmbs, tarIEmbs) / temp
 
-	src_deno = srcUEmbs @ srcIEmbs.T / temp + 1e-8
-	tar_deno = tarUEmbs @ tarIEmbs.T / temp + 1e-8
+	src_deno = srcUEmbs @ srcIEmbs.T / temp
+	tar_deno = tarUEmbs @ tarIEmbs.T / temp
 
-	src_dist = t.log(t.exp(srcpred) / (t.exp(src_deno).sum(-1) + 1e-6) + 1e-6 )
-	tar_dist = t.log(t.exp(tarpred) / (t.exp(tar_deno).sum(-1) + 1e-6 ) + 1e-6 )
+	# log-sum-exp trick: log(exp(a)/sum(exp(b))) = a - logsumexp(b)
+	src_dist = srcpred - t.logsumexp(src_deno, dim=-1)
+	tar_dist = tarpred - t.logsumexp(tar_deno, dim=-1)
 
 	loss = align(src_dist, tar_dist)
 

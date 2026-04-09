@@ -364,6 +364,7 @@ class GAIE(nn.Module):
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
         # Encode the influence graph
         mu, logvar = self.encoder(ts_drp_adj, self.node_feats)
+        logvar = t.clamp(logvar, min=-20, max=20)  # prevent exp overflow in reparameterize/KL
         z = self.reparameterize(mu, logvar)
 
         # Shift generator
