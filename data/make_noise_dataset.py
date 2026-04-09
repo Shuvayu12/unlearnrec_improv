@@ -1,3 +1,10 @@
+import os
+import sys
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 import torch as t
 import Utils.time_logger as logger
 from Utils.time_logger import log
@@ -6,7 +13,6 @@ from config.params import args
 from data.data_handler import DataHandler
 import numpy as np
 import pickle
-import os
 import setproctitle
 from scipy.sparse import coo_matrix
 import random
@@ -117,7 +123,7 @@ def find_least_related_edges_smp(model, handler, save_path, ratio=0.6):
         pickle.dump((adv_adj, least_related_edges), fs)        
 
 def load_model(load_model):
-    ckp = t.load(load_model)
+    ckp = t.load(load_model, weights_only=False)
     model = ckp['model']
     return model
 
