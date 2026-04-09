@@ -179,7 +179,8 @@ class Coach:
         t.save(content,  args.save_path + '.mod')
         log('Model Saved: %s' % args.save_path)
 
-    def load_model(self, load_model=args.load_model):
+    def load_model(self, load_model=None):
+        load_model = args.load_model if load_model is None else load_model
         ckp = t.load(load_model + '.mod', weights_only=False)
         self.model = ckp['model']
         self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)

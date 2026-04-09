@@ -34,6 +34,7 @@ def ParseArgs():
 
 	# Checkpointing
 	parser.add_argument('--early_stop', default=10, type=int, help='number of epochs for early stop')
+	parser.add_argument('--load_model', default=None, help='path of checkpoint to load before training/evaluation.')
 	parser.add_argument('--model_2_finetune', default='./checkpoints/gowalla/unlearn/NOadv_unlearn_gowalla_simgcl_pdrp5p_tdrp3p_bpr1_unlearn1_align_t10_1_leaky0.99_unssl1e-3', help='path of pretrained (for unlearning) model to finetune.')    	
 	parser.add_argument('--trained_model', default="./checkpoints/gowalla/before_unlearning/pretrain_gowalla_simgcl_advlightgcn0.5_reg1e-7_lr1e-3_ssl1e-2_esp2e-1_t1e-1_b4096_ep200_dim128_ly3", help='name of trained model to unlearn.')                        	     		
 	parser.add_argument('--save_path', default='./checkpoints/gowalla/pretrain_4_unlearning/tmp', help='file name to save model.')                                   
