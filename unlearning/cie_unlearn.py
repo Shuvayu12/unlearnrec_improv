@@ -151,6 +151,7 @@ class Coach:
 
             self.opt.zero_grad()
             loss.backward()
+            t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
 
             assert t.isnan(loss).sum() == 0, print(loss)
 
