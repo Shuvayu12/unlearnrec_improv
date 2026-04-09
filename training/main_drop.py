@@ -313,7 +313,7 @@ class Coach:
         if not trained_model.endswith('.mod'):
             trained_model = trained_model + '.mod'
 
-        ckp = t.load(trained_model)
+        ckp = t.load(trained_model, weights_only=False)
 
         model = ckp['model']
         return model
@@ -323,7 +323,7 @@ class Coach:
         if not model_2_finetune.endswith('.mod'):
             model_2_finetune = model_2_finetune + '.mod'
 
-        ckp = t.load(model_2_finetune)
+        ckp = t.load(model_2_finetune, weights_only=False)
         self.model = ckp['model']
         self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)
 

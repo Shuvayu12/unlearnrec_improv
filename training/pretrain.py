@@ -174,7 +174,7 @@ class Coach:
         log('Model Saved: %s' % args.save_path)
 
     def load_model(self, load_model=args.load_model):
-        ckp = t.load(load_model + '.mod')
+        ckp = t.load(load_model + '.mod', weights_only=False)
         self.model = ckp['model']
         self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)
         

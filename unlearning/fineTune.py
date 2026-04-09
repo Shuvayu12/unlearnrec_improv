@@ -379,7 +379,7 @@ class Coach:
         log('Model Saved: %s' % args.save_path)
 
     def load_trained_model(self, trained_model = args.trained_model):
-        ckp = t.load(trained_model + '.mod')
+        ckp = t.load(trained_model + '.mod', weights_only=False)
         # ckp = t.load(trained_model)
         print("####################tyep of trained model#####################")
         print(type(ckp))
@@ -388,7 +388,7 @@ class Coach:
         
 
     def load_model_2_finetune(self, model_2_finetune=args.model_2_finetune):
-        ckp = t.load(model_2_finetune + '.mod')
+        ckp = t.load(model_2_finetune + '.mod', weights_only=False)
         self.model = ckp['model']
         # self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)
         return self.model

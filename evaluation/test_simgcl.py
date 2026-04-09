@@ -99,7 +99,7 @@ class Coach:
         log('Model Saved: %s' % args.save_path)
 
     def load_model(self, load_model=args.load_model):
-        ckp = t.load(load_model + '.mod')
+        ckp = t.load(load_model + '.mod', weights_only=False)
         self.model = ckp['model']
         self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)
         
@@ -107,7 +107,7 @@ class Coach:
         # with open('../../History/' + load_model + '.his', 'rb') as fs:
         #     self.metrics = pickle.load(fs)
     def load_trained_model(self, trained_model = args.trained_model):
-        ckp = t.load(trained_model + '.mod')
+        ckp = t.load(trained_model + '.mod', weights_only=False)
         print("####################tyep of trained model#####################")
         print(type(ckp))
         model = ckp['model']
