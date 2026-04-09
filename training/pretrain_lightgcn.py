@@ -11,6 +11,7 @@ from Utils.time_logger import log
 from config.params import args
 from models.Model import *
 from data.data_handler import DataHandler
+from Utils.utils import innerProduct, print_args
 import numpy as np
 import pickle
 import setproctitle
