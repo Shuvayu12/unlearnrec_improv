@@ -35,16 +35,14 @@ def ParseArgs():
 	# Checkpointing
 	parser.add_argument('--early_stop', default=10, type=int, help='number of epochs for early stop')
 	parser.add_argument('--load_model', default=None, type=str, help='path of model checkpoint to resume training from')
-	parser.add_argument('--model_2_finetune', default='./checkpoints/gowalla/unlearn/NOadv_unlearn_gowalla_simgcl_pdrp5p_tdrp3p_bpr1_unlearn1_align_t10_1_leaky0.99_unssl1e-3', help='path of pretrained (for unlearning) model to finetune.')    	
-	parser.add_argument('--trained_model', default="./checkpoints/gowalla/before_unlearning/pretrain_gowalla_simgcl_advlightgcn0.5_reg1e-7_lr1e-3_ssl1e-2_esp2e-1_t1e-1_b4096_ep200_dim128_ly3", help='name of trained model to unlearn.')                        	     		
-	parser.add_argument('--save_path', default='./checkpoints/gowalla/pretrain_4_unlearning/tmp', help='file name to save model.')                                   
+	parser.add_argument('--model_2_finetune', default=None, help='path of pretrained (for unlearning) model to finetune.')
+	parser.add_argument('--trained_model', default=None, help='name of trained model to unlearn.')
+	parser.add_argument('--save_path', default='./ckpt/tmp', help='file name to save model.')                                   
 
 
 	# Testing
 	parser.add_argument('--topk', default=20, type=int, help='K of top K')	
-	# parser.add_argument('--data', default='ml1m', type=str, help='name of dataset')	
-	# parser.add_argument('--data', default='yelp2018', type=str, help='name of dataset')
-	parser.add_argument('--data', default='gowalla', type=str, help='name of dataset')     
+	parser.add_argument('--data', default='ml1m', type=str, help='name of dataset')     
 	parser.add_argument('--tst_epoch', default=3, type=int, help='number of epoch to test while training')	
 
 

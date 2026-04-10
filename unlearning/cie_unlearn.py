@@ -278,7 +278,9 @@ class Coach:
         t.save(content, save_path)
         log('Model Saved: %s' % args.save_path)
 
-    def load_trained_model(self, trained_model=args.trained_model):
+    def load_trained_model(self, trained_model=None):
+        if trained_model is None:
+            trained_model = args.trained_model
         if not trained_model.endswith('.mod'):
             trained_model = trained_model + '.mod'
         ckp = t.load(trained_model, weights_only=False)
