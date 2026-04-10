@@ -274,7 +274,9 @@ class Coach:
         model = ckp['model']
         return model
 
-    def load_model_2_finetune(self, model_2_finetune=args.model_2_finetune):
+    def load_model_2_finetune(self, model_2_finetune=None):
+        if model_2_finetune is None:
+            model_2_finetune = args.model_2_finetune
         if not model_2_finetune.endswith('.mod'):
             model_2_finetune = model_2_finetune + '.mod'
         ckp = t.load(model_2_finetune, weights_only=False)
