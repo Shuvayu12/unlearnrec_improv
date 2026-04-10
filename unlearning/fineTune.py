@@ -393,7 +393,9 @@ class Coach:
         return model
         
 
-    def load_model_2_finetune(self, model_2_finetune=args.model_2_finetune):
+    def load_model_2_finetune(self, model_2_finetune=None):
+        if model_2_finetune is None:
+            model_2_finetune = args.model_2_finetune
         ckp = t.load(model_2_finetune + '.mod', weights_only=False)
         self.model = ckp['model']
         # self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)
