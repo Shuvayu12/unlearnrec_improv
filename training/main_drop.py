@@ -245,7 +245,7 @@ class Coach:
         neg_rows, neg_cols = [], []
         rows, cols = self.handler.ori_trn_mat.row, self.handler.ori_trn_mat.col
         edge_set = set(list(map(lambda x: (rows[x], cols[x]), list(range(len(rows))))))
-        for i in range(len(rows)):
+        for i in range(drp_length):
             while True:
                 rdm_row = np.random.randint(args.user)
                 rdm_col = np.random.randint(args.item)
@@ -315,9 +315,7 @@ class Coach:
         t.save(content,  save_path)
         log('Model Saved: %s' % args.save_path)
 
-    def load_trained_model(self, trained_model=None):
-        if trained_model is None:
-            trained_model = args.trained_model
+    def load_trained_model(self, trained_model = args.trained_model):
         if not trained_model.endswith('.mod'):
             trained_model = trained_model + '.mod'
 

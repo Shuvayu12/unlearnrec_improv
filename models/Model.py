@@ -289,17 +289,20 @@ class GAIEEncoder(nn.Module):
     def __init__(self, in_dim, hidden_dim, latent_dim, num_layers):
         super(GAIEEncoder, self).__init__()
         self.gcnLayers = nn.ModuleList()
+        self.norms = nn.ModuleList()
         self.gcnLayers.append(nn.Linear(in_dim, hidden_dim))
+        self.norms.append(nn.LayerNorm(hidden_dim))
         for _ in range(num_layers - 2):
             self.gcnLayers.append(nn.Linear(hidden_dim, hidden_dim))
+            self.norms.append(nn.LayerNorm(hidden_dim))
         self.mu_layer = nn.Linear(hidden_dim, latent_dim)
         self.logvar_layer = nn.Linear(hidden_dim, latent_dim)
         self.act = nn.LeakyReLU(negative_slope=0.2)
 
     def forward(self, adj, node_feats):
         h = node_feats
-        for layer in self.gcnLayers:
-            h = self.act(layer(adj.matmul(h)))
+        for layer, norm in zip(self.gcnLayers, self.norms):
+            h = self.act(norm(layer(adj.matmul(h))))
         mu = self.mu_layer(h)
         logvar = self.logvar_layer(h)
         return mu, logvar
@@ -367,10 +370,11 @@ class GAIE(nn.Module):
         logvar = t.clamp(logvar, min=-20, max=20)  # prevent exp overflow in reparameterize/KL
         z = self.reparameterize(mu, logvar)
 
-        # Shift generator
+        # Shift generator with skip connection from z
         delta_emb = z
         for layer in self.shift_mlp:
             delta_emb = layer(delta_emb)
+        delta_emb = delta_emb + z  # skip connection
 
         # Embedding correction
         tuned_emb = self.ini_embeds + delta_emb
@@ -561,7 +565,8 @@ class AIE(nn.Module):
         layer_outs = [h]
 
         for gat in self.gat_layers:
-            h = self.layer_act(gat(ts_drp_adj, h))
+            h_new = self.layer_act(gat(ts_drp_adj, h))
+            h = h + h_new  # residual connection
             layer_outs.append(h)
 
         # Mean aggregation across layers
@@ -682,7 +687,7 @@ class HIE(nn.Module):
 
     Pipeline:
       Influence graph A_Δ → GNN encoder → node embeddings →
-      mean-pool → latent z → Hypernetwork H(z) → W_u →
+      attention-pool → latent z → Hypernetwork H(z) → W_u →
       ΔE = W_u * E → corrected embeddings
     """
     def __init__(self, handler, model, ini_embeds, fnl_embeds, hyper_rank=32):
@@ -698,8 +703,18 @@ class HIE(nn.Module):
             self.gnn_layers.append(nn.Linear(args.latdim, args.latdim))
         self.layer_act = nn.ELU()
 
+        # Attention pooling: learn which nodes matter for the global latent
+        self.attn_gate = nn.Sequential(
+            nn.Linear(args.latdim, args.latdim // 2),
+            nn.Tanh(),
+            nn.Linear(args.latdim // 2, 1)
+        )
+
         # Hypernetwork: latent z → update weight matrix W_u
         self.hypernet = HyperNetwork(args.latdim, num_nodes, args.latdim, hyper_rank)
+
+        # Learnable residual gate to control how much shift to apply
+        self.gate = nn.Parameter(t.zeros(1))
 
         self.ini_embeds = ini_embeds.detach()
         self.fnl_embeds = fnl_embeds.detach()
@@ -728,14 +743,16 @@ class HIE(nn.Module):
         # Mean aggregation across layers
         h_bar = sum(layer_outs) / len(layer_outs)  # (N, d)
 
-        # Global latent z via mean-pooling over all nodes
-        z = h_bar.mean(dim=0)  # (d,)
+        # Attention-weighted pooling instead of naive mean
+        attn_scores = self.attn_gate(h_bar)          # (N, 1)
+        attn_weights = t.softmax(attn_scores, dim=0)  # (N, 1)
+        z = (attn_weights * h_bar).sum(dim=0)          # (d,)
 
         # Hypernetwork generates update weights
         W_u = self.hypernet(z)  # (N, d)
 
-        # Embedding update: ΔE = W_u ⊙ E  (element-wise)
-        delta_emb = W_u * self.ini_embeds
+        # Embedding update with gated residual: ΔE = sigmoid(gate) * W_u ⊙ E
+        delta_emb = t.sigmoid(self.gate) * W_u * self.ini_embeds
 
         # Corrected embeddings
         tuned_emb = self.ini_embeds + delta_emb
@@ -831,10 +848,12 @@ class CIE(nn.Module):
         # Learnable input features for influence GNN
         self.node_feats = nn.Parameter(init(t.empty(num_nodes, args.latdim)))
 
-        # GNN layers on the influence graph
+        # GNN layers on the influence graph with LayerNorm for stability
         self.gnn_layers = nn.ModuleList()
+        self.gnn_norms = nn.ModuleList()
         for _ in range(args.gnn_layer):
             self.gnn_layers.append(nn.Linear(args.latdim, args.latdim))
+            self.gnn_norms.append(nn.LayerNorm(args.latdim))
         self.layer_act = nn.ELU()
 
         # Causal Effect Predictor: maps latent Z to embedding shift
@@ -862,11 +881,11 @@ class CIE(nn.Module):
             self.model.ini_embeds.requires_grad = False
 
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
-        # GNN encode the influence graph
+        # GNN encode the influence graph with LayerNorm
         h = self.node_feats
         layer_outs = [h]
-        for gnn in self.gnn_layers:
-            h = self.layer_act(gnn(ts_drp_adj.matmul(h)))
+        for gnn, norm in zip(self.gnn_layers, self.gnn_norms):
+            h = self.layer_act(norm(gnn(ts_drp_adj.matmul(h))))
             layer_outs.append(h)
 
         # Mean aggregation across layers
@@ -928,22 +947,24 @@ class CIE(nn.Module):
             )
 
         # Contrastive consistency loss (L_c)
-        # Enforce corrected embeddings to be close to counterfactual
-        # embeddings for the batch users/items
-        cf_uEmbeds = self.cf_embeds[:args.user].detach()
-        cf_iEmbeds = self.cf_embeds[args.user:].detach()
+        # Operate on tuned_emb (before rec model) to avoid conflicting
+        # with unlearn_loss which operates on final embeddings
+        cf_tuned_u = self.cf_embeds[:args.user].detach()
+        cf_tuned_i = self.cf_embeds[args.user:].detach()
+        tuned_u = tuned_emb[:args.user]
+        tuned_i = tuned_emb[args.user:]
         contrast_loss = (
-            F.mse_loss(usr_embeds[ancs], cf_uEmbeds[ancs])
-            + F.mse_loss(itm_embeds[poss], cf_iEmbeds[poss])
+            F.mse_loss(tuned_u[ancs], cf_tuned_u[ancs])
+            + F.mse_loss(tuned_i[poss], cf_tuned_i[poss])
         )
 
         # Causal consistency loss (L_causal)
-        # ||output_corrected - E^cf||^2 for nodes involved in deleted edges
+        # Only on nodes involved in deleted edges, at the tuned_emb level
         drp_u = drp_edges[0]
         drp_i = drp_edges[1]
         causal_loss = (
-            F.mse_loss(usr_embeds[drp_u], cf_uEmbeds[drp_u])
-            + F.mse_loss(itm_embeds[drp_i], cf_iEmbeds[drp_i])
+            F.mse_loss(tuned_u[drp_u], cf_tuned_u[drp_u])
+            + F.mse_loss(tuned_i[drp_i], cf_tuned_i[drp_i])
         )
 
         # Total: L = L_M + lambda_u L_u + lambda_p L_p + lambda_c L_c + lambda_causal L_causal
@@ -1130,10 +1151,8 @@ def get_shape(adj):
 class FeedForwardLayer(nn.Module):
     def __init__(self, in_feat, out_feat, bias=False, act=None):
         super(FeedForwardLayer, self).__init__()
-        # self.linear = nn.Linear(in_feat, out_feat, bias=bias)
-        # self.W = nn.Parameter(t.zeros(args.latdim, args.latdim).cuda())
-        self.W = nn.Parameter(t.eye(args.latdim, args.latdim).cuda(), requires_grad=False)
-        self.bias = nn.Parameter(t.zeros( 1, args.latdim).cuda(), requires_grad=False)
+        self.W = nn.Parameter(init(t.empty(args.latdim, args.latdim).cuda()))
+        self.bias = nn.Parameter(t.zeros( 1, args.latdim).cuda())
 
         
         if act == 'identity' or act is None:
