@@ -66,7 +66,8 @@ class Coach:
                 assert reses['Recall'] >= topo_reses['Recall'] * args.perf_degrade, \
                     "Performance degraded below threshold. Increase align_wei or decrease perf_degrade."
 
-                cur_gap = self.test_unlearn(self.model, prefix='GAIE test:')
+                mi_result = self.test_unlearn(self.model, prefix='GAIE test:')
+                cur_gap = mi_result['mi_ng']
                 self.handler.load_data(drop_rate=args.pretrain_drop_rate, adv_attack=False)
 
                 if cur_gap > global_score_gap:
@@ -148,7 +149,7 @@ class Coach:
             self.opt.step()
 
             log('Step %d/%d: loss = %.6f, regLoss = %.6f, unlearn = %.6f, align = %.6f, rec = %.6f         '
-                % (i, steps, loss, reg_loss, unlearn_loss, align_loss, rec_loss),
+                % (i, steps, loss.item(), reg_loss.item(), unlearn_loss.item(), align_loss.item(), rec_loss.item()),
                 save=False, oneline=True)
         ret = dict()
         ret['Loss'] = ep_loss / steps
@@ -236,7 +237,7 @@ class Coach:
         print(f"  MI pretrain: MI-BF={mi_pretr['mi_bf']:.4f}, MI-NG={mi_pretr['mi_ng']:.4f}, MI-AUC={mi_pretr['mi_auc']:.4f}, MI-ACC={mi_pretr['mi_acc']:.4f}")
         print("=" * 120)
 
-        return our_neg_res.mean().item() - our_drp_res.mean().item()
+        return mi
 
     def cal_metrics(self, top_locs, tst_locs, bat_ids):
         assert top_locs.shape[0] == len(bat_ids)

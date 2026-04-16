@@ -56,7 +56,8 @@ class DataHandler:
 
     def _normalize_adj(self, mat):
         degree = np.array(mat.sum(axis=-1))
-        d_inv_sqrt = np.reshape(np.power(degree, -0.5), [-1])
+        with np.errstate(divide='ignore'):
+            d_inv_sqrt = np.reshape(np.power(degree, -0.5), [-1])
         d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
         d_inv_sqrt_mat = sp.diags(d_inv_sqrt)
         if mat.shape[0] == mat.shape[1]:
@@ -64,7 +65,8 @@ class DataHandler:
         else:
             tem = d_inv_sqrt_mat.dot(mat)
             col_degree = np.array(mat.sum(axis=0))
-            d_inv_sqrt = np.reshape(np.power(col_degree, -0.5), [-1])
+            with np.errstate(divide='ignore'):
+                d_inv_sqrt = np.reshape(np.power(col_degree, -0.5), [-1])
             d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.0
             d_inv_sqrt_mat = sp.diags(d_inv_sqrt)
             return tem.dot(d_inv_sqrt_mat).tocoo()
@@ -74,7 +76,7 @@ class DataHandler:
         idxs = t.from_numpy(np.vstack([mat.row, mat.col]).astype(np.int64))
         vals = t.from_numpy(mat.data.astype(np.float32))
         shape = t.Size(mat.shape)
-        return t.sparse.FloatTensor(idxs, vals, shape).cuda()
+        return t.sparse_coo_tensor(idxs, vals, shape).cuda()
     def _scipy_to_torch_sparse_adj(self, mat):
         ret = ts.SparseTensor.from_scipy(mat).cuda()
         return ret

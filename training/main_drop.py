@@ -187,7 +187,7 @@ class Coach:
             self.opt.step()
 
 
-            log('Step %d/%d: loss = %.6f, regLoss = %.6f, unlearn_loss = %.6f, align_loss = %.6f,unlearn_ssl = %.6f         ' % (i, steps, loss, reg_loss, unlearn_loss, align_loss, unlearn_ssl), save=False, oneline=True)
+            log('Step %d/%d: loss = %.6f, regLoss = %.6f, unlearn_loss = %.6f, align_loss = %.6f,unlearn_ssl = %.6f         ' % (i, steps, loss.item(), reg_loss.item(), unlearn_loss.item(), align_loss.item(), unlearn_ssl.item()), save=False, oneline=True)
         ret = dict()
         ret['Loss'] = ep_loss / steps
         ret['preLoss'] = ep_preloss / steps

@@ -121,7 +121,7 @@ class Coach:
             self.opt.zero_grad()
             loss.backward()
             self.opt.step()
-            log('Step %d/%d: loss = %.6f, regLoss = %.6f         ' % (i, steps, loss, reg_loss), save=False, oneline=True)
+            log('Step %d/%d: loss = %.6f, regLoss = %.6f         ' % (i, steps, loss.item(), reg_loss.item()), save=False, oneline=True)
         ret = dict()
         ret['Loss'] = ep_loss / steps
         ret['preLoss'] = ep_preloss / steps
