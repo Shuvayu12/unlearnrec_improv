@@ -189,83 +189,95 @@ def contrastLoss(embeds1, embeds2, nodes, temp=10):
 	return -t.log(nume / deno).mean()
 
 
-def cal_mi_metrics(drp_scores, neg_scores):
-    """Compute Membership Inference metrics for unlearning evaluation.
+def _safe_ratio(numerator, denominator, eps=1e-8):
+	return (numerator / denominator.clamp_min(eps)).item()
 
-    A membership inference attacker tries to distinguish deleted edges
-    (members) from negative/non-existent edges (non-members) using
-    prediction scores. Better unlearning → scores are indistinguishable.
 
-    Args:
-        drp_scores: (tensor) prediction scores on deleted edges (positives for attacker)
-        neg_scores: (tensor) prediction scores on negative edges (negatives for attacker)
+def _cal_membership_attack_metrics(drp_scores, neg_scores):
+	drp = drp_scores.detach().cpu()
+	neg = neg_scores.detach().cpu()
 
-    Returns:
-        dict with:
-          mi_bf  - MI Balanced F1: F1 of best-threshold binary classifier
-          mi_ng  - MI Negative Gap: |mean(drp) - mean(neg)|, closer to 0 = better unlearning
-          mi_auc - MI AUC: area under ROC curve of the attacker
-          mi_acc - MI Accuracy: best-threshold accuracy
-    """
-    drp = drp_scores.detach().cpu()
-    neg = neg_scores.detach().cpu()
+	# Labels: 1 = deleted (member), 0 = negative (non-member)
+	scores = t.cat([drp, neg])
+	labels = t.cat([t.ones(len(drp)), t.zeros(len(neg))])
 
-    # Labels: 1 = deleted (member), 0 = negative (non-member)
-    scores = t.cat([drp, neg])
-    labels = t.cat([t.ones(len(drp)), t.zeros(len(neg))])
+	n_pos = labels.sum().item()
+	n_neg = len(labels) - n_pos
 
-    # Sort by score descending, sweep thresholds
-    sorted_indices = t.argsort(scores, descending=True)
-    sorted_labels = labels[sorted_indices]
-    sorted_scores = scores[sorted_indices]
+	best_f1 = 0.0
+	best_acc = 0.0
+	best_auc = 0.0
 
-    n_pos = labels.sum().item()
-    n_neg = len(labels) - n_pos
+	# Sweep both directions: attacker may use high-score or low-score as member signal
+	for descending in [True, False]:
+		sorted_indices = t.argsort(scores, descending=descending)
+		sorted_labels = labels[sorted_indices]
 
-    # Compute AUC via trapezoidal rule on ROC
-    tp = 0.0
-    fp = 0.0
-    auc = 0.0
-    prev_fpr = 0.0
-    prev_tpr = 0.0
+		tp = 0.0
+		fp = 0.0
+		auc = 0.0
+		prev_fpr = 0.0
+		prev_tpr = 0.0
 
-    best_f1 = 0.0
-    best_acc = 0.0
+		for i in range(len(sorted_labels)):
+			if sorted_labels[i] == 1:
+				tp += 1
+			else:
+				fp += 1
+			tpr = tp / max(n_pos, 1)
+			fpr = fp / max(n_neg, 1)
 
-    for i in range(len(sorted_labels)):
-        if sorted_labels[i] == 1:
-            tp += 1
-        else:
-            fp += 1
-        tpr = tp / max(n_pos, 1)
-        fpr = fp / max(n_neg, 1)
+			auc += (fpr - prev_fpr) * (tpr + prev_tpr) / 2
+			prev_fpr = fpr
+			prev_tpr = tpr
 
-        # AUC
-        auc += (fpr - prev_fpr) * (tpr + prev_tpr) / 2
-        prev_fpr = fpr
-        prev_tpr = tpr
+			prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+			rec = tpr
+			f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
 
-        # Precision, Recall, F1 for the positive class (deleted edges)
-        prec = tp / (tp + fp) if (tp + fp) > 0 else 0
-        rec = tpr
-        f1 = 2 * prec * rec / (prec + rec) if (prec + rec) > 0 else 0
+			tn = n_neg - fp
+			acc = (tp + tn) / len(labels)
 
-        # Accuracy
-        tn = n_neg - fp
-        fn = n_pos - tp
-        acc = (tp + tn) / len(labels)
+			if f1 > best_f1:
+				best_f1 = f1
+			if acc > best_acc:
+				best_acc = acc
 
-        if f1 > best_f1:
-            best_f1 = f1
-        if acc > best_acc:
-            best_acc = acc
+		if auc > best_auc:
+			best_auc = auc
 
-    # MI Negative Gap
-    mi_ng = abs(drp.mean().item() - neg.mean().item())
+	return best_auc, best_acc
 
-    return {
-        'mi_bf': best_f1,
-        'mi_ng': mi_ng,
-        'mi_auc': auc,
-        'mi_acc': best_acc,
-    }
+
+def cal_mi_metrics(drp_scores, neg_scores, before_drp_scores=None):
+	"""Compute paper-consistent unlearning metrics.
+
+	MI-BF in the paper is the ratio of the average recommendation probability on
+	deleted edges before versus after unlearning. MI-NG is the ratio of average
+	negative-sample probability versus average deleted-edge probability after
+	unlearning. Both should be greater than 1 for stronger unlearning.
+
+	We keep MI-AUC and MI-ACC as auxiliary attacker diagnostics based on how well
+	a deleted-edge score can still be separated from a negative edge score.
+	"""
+	after_drp_prob = drp_scores.detach().cpu().sigmoid()
+	neg_prob = neg_scores.detach().cpu().sigmoid()
+
+	if before_drp_scores is None:
+		before_drp_prob = after_drp_prob
+	else:
+		before_drp_prob = before_drp_scores.detach().cpu().sigmoid()
+
+	mi_bf = _safe_ratio(before_drp_prob.mean(), after_drp_prob.mean())
+	mi_ng = _safe_ratio(neg_prob.mean(), after_drp_prob.mean())
+	mi_auc, mi_acc = _cal_membership_attack_metrics(drp_scores, neg_scores)
+
+	return {
+		'mi_bf': mi_bf,
+		'mi_ng': mi_ng,
+		'mi_auc': mi_auc,
+		'mi_acc': mi_acc,
+		'avg_before_prob': before_drp_prob.mean().item(),
+		'avg_after_prob': after_drp_prob.mean().item(),
+		'avg_neg_prob': neg_prob.mean().item(),
+	}

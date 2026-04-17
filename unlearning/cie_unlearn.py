@@ -242,8 +242,8 @@ class Coach:
         print(f"  Negative edges (mean,var,max,min): <{our_neg_res.mean().item():0.4f}, {our_neg_res.var().item():0.4f}, {our_neg_res.max().item():0.4f}, {our_neg_res.min().item():0.4f}>  |  Pretrain: <{pretr_neg_res.mean().item():0.4f},{pretr_neg_res.var().item():0.4f},{pretr_neg_res.max().item():0.4f},{pretr_neg_res.min().item():0.4f}>")
 
         # Membership Inference metrics
-        mi = cal_mi_metrics(our_drp_res, our_neg_res)
-        mi_pretr = cal_mi_metrics(pretr_drp_res, pretr_neg_res)
+        mi = cal_mi_metrics(our_drp_res, our_neg_res, before_drp_scores=pretr_drp_res)
+        mi_pretr = cal_mi_metrics(pretr_drp_res, pretr_neg_res, before_drp_scores=pretr_drp_res)
         print(f"  MI metrics:  MI-BF={mi['mi_bf']:.4f}, MI-NG={mi['mi_ng']:.4f}, MI-AUC={mi['mi_auc']:.4f}, MI-ACC={mi['mi_acc']:.4f}")
         print(f"  MI pretrain: MI-BF={mi_pretr['mi_bf']:.4f}, MI-NG={mi_pretr['mi_ng']:.4f}, MI-AUC={mi_pretr['mi_auc']:.4f}, MI-ACC={mi_pretr['mi_acc']:.4f}")
         print("=" * 120)
