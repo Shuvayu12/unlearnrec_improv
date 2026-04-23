@@ -370,11 +370,11 @@ class GAIE(nn.Module):
         logvar = t.clamp(logvar, min=-20, max=20)  # prevent exp overflow in reparameterize/KL
         z = self.reparameterize(mu, logvar)
 
-        # Shift generator with skip connection from z
+        # Shift generator (MLP maps z to embedding correction)
         delta_emb = z
         for layer in self.shift_mlp:
             delta_emb = layer(delta_emb)
-        delta_emb = delta_emb + z  # skip connection
+        # No raw +z skip: avoids uncontrolled shift magnitudes that hurt Recall
 
         # Embedding correction
         tuned_emb = self.ini_embeds + delta_emb
@@ -732,6 +732,14 @@ class HIE(nn.Module):
             self.model.ini_embeds.detach()
             self.model.ini_embeds.requires_grad = False
 
+        # Store deleted-edge affected nodes for focused attention pooling.
+        # Pooling from only these nodes makes z a targeted representation of the
+        # deletion neighbourhood instead of a diluted whole-graph average.
+        drp_u = t.as_tensor(handler.dropped_edges[0], dtype=t.long)
+        drp_i = t.as_tensor(handler.dropped_edges[1], dtype=t.long) + args.user
+        affected = t.cat([drp_u, drp_i]).unique()
+        self.register_buffer('affected_nodes', affected)
+
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
         # GNN encode the influence graph
         h = self.node_feats
@@ -743,10 +751,12 @@ class HIE(nn.Module):
         # Mean aggregation across layers
         h_bar = sum(layer_outs) / len(layer_outs)  # (N, d)
 
-        # Attention-weighted pooling instead of naive mean
-        attn_scores = self.attn_gate(h_bar)          # (N, 1)
-        attn_weights = t.softmax(attn_scores, dim=0)  # (N, 1)
-        z = (attn_weights * h_bar).sum(dim=0)          # (d,)
+        # Attention pooling restricted to deleted-edge affected nodes (users + items).
+        # z becomes a focused summary of what was deleted, not a diluted whole-graph mean.
+        pool_h = h_bar[self.affected_nodes]           # (K, d)
+        attn_scores = self.attn_gate(pool_h)           # (K, 1)
+        attn_weights = t.softmax(attn_scores, dim=0)   # (K, 1)
+        z = (attn_weights * pool_h).sum(dim=0)         # (d,)
 
         # Hypernetwork generates update weights
         W_u = self.hypernet(z)  # (N, d)
@@ -933,35 +943,51 @@ class CIE(nn.Module):
         tar_fnl_uEmbeds = self.fnl_embeds[:args.user].detach()
         tar_fnl_iEmbeds = self.fnl_embeds[args.user:].detach()
 
-        if args.align_type == 'v2':
-            align_loss = cal_positive_pred_align_v2(
-                usr_embeds[ancs], tar_fnl_uEmbeds[ancs],
-                itm_embeds[poss], tar_fnl_iEmbeds[poss],
-                cal_l2_distance, temp=args.align_temp
-            )
-        elif args.align_type == 'v3':
-            align_loss = cal_positive_pred_align_v3(
-                usr_embeds[ancs], tar_fnl_uEmbeds[ancs],
-                itm_embeds[poss], tar_fnl_iEmbeds[poss],
-                cal_l2_distance, temp=args.align_temp
-            )
+        # True causal alignment:
+        # Deleted-edge nodes must align to cf_embeds (counterfactual target = do(e=0)).
+        # Applying fnl_embeds alignment to those same nodes would pull them BACK toward
+        # the pre-deletion state, directly fighting the causal signal.
+        # Solution: align_loss applies ONLY to retained (non-deleted-edge) anchor nodes.
+        drp_u = drp_edges[0]
+        drp_i = drp_edges[1]
+        drp_u_flag = t.zeros(args.user, dtype=t.bool, device=ancs.device)
+        drp_u_flag[drp_u] = True
+        retained_mask = ~drp_u_flag[ancs]   # True for anchors NOT in deleted edges
+        ret_ancs = ancs[retained_mask]
+        ret_poss = poss[retained_mask]
 
-        # Contrastive consistency loss (L_c)
-        # Operate on tuned_emb (before rec model) to avoid conflicting
-        # with unlearn_loss which operates on final embeddings
+        if len(ret_ancs) > 0:
+            if args.align_type == 'v2':
+                align_loss = cal_positive_pred_align_v2(
+                    usr_embeds[ret_ancs], tar_fnl_uEmbeds[ret_ancs],
+                    itm_embeds[ret_poss], tar_fnl_iEmbeds[ret_poss],
+                    cal_l2_distance, temp=args.align_temp
+                )
+            elif args.align_type == 'v3':
+                align_loss = cal_positive_pred_align_v3(
+                    usr_embeds[ret_ancs], tar_fnl_uEmbeds[ret_ancs],
+                    itm_embeds[ret_poss], tar_fnl_iEmbeds[ret_poss],
+                    cal_l2_distance, temp=args.align_temp
+                )
+        else:
+            align_loss = t.tensor(0., device=ancs.device)
+
+        # cf_embeds = pretrained model run on post-deletion graph ts_pk_adj.
+        # This is the true do(e_ij=0) counterfactual for every node.
         cf_tuned_u = self.cf_embeds[:args.user].detach()
         cf_tuned_i = self.cf_embeds[args.user:].detach()
         tuned_u = tuned_emb[:args.user]
         tuned_i = tuned_emb[args.user:]
+
+        # Contrastive consistency: ALL batch nodes align tuned_emb to cf (valid causal target)
         contrast_loss = (
             F.mse_loss(tuned_u[ancs], cf_tuned_u[ancs])
             + F.mse_loss(tuned_i[poss], cf_tuned_i[poss])
         )
 
-        # Causal consistency loss (L_causal)
-        # Only on nodes involved in deleted edges, at the tuned_emb level
-        drp_u = drp_edges[0]
-        drp_i = drp_edges[1]
+        # Causal loss (ATT estimator): specifically targets deleted-edge nodes toward cf.
+        # This provides a precise embedding-space unlearning target that complements
+        # unlearn_loss (which only says "decrease score", not "reach this target").
         causal_loss = (
             F.mse_loss(tuned_u[drp_u], cf_tuned_u[drp_u])
             + F.mse_loss(tuned_i[drp_i], cf_tuned_i[drp_i])
@@ -1170,8 +1196,8 @@ class FeedForwardLayer(nn.Module):
         if self.act is None:
             # return self.linear(embeds)
             return  embeds @ self.W 
-        # return (self.act(  embeds @ self.W + self.bias )) + embeds  #  default   v1
-        return self.act(  embeds @ self.W + self.bias )  #  v2
+        return (self.act(  embeds @ self.W + self.bias )) + embeds  #  residual skip (v1)
+        # return self.act(  embeds @ self.W + self.bias )  #  no-skip (v2)
     
 
 class SGL(nn.Module):
