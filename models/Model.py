@@ -880,15 +880,9 @@ class CIE(nn.Module):
         self.cf_embeds.requires_grad = False
         self.model = model
 
-        # Freeze the pretrained recommendation model
-        if hasattr(self.model, "uEmbeds") and hasattr(self.model, "iEmbeds"):
-            self.model.uEmbeds.detach()
-            self.model.uEmbeds.requires_grad = False
-            self.model.iEmbeds.detach()
-            self.model.iEmbeds.requires_grad = False
-        else:
-            self.model.ini_embeds.detach()
-            self.model.ini_embeds.requires_grad = False
+        # Freeze entire pretrained backbone — only CIE own encoder trains
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
         # GNN encode the influence graph with LayerNorm
