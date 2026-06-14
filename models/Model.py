@@ -347,15 +347,9 @@ class GAIE(nn.Module):
         self.fnl_embeds.requires_grad = False
         self.model = model
 
-        # Freeze the pretrained recommendation model
-        if hasattr(self.model, "uEmbeds") and hasattr(self.model, "iEmbeds"):
-            self.model.uEmbeds.detach()
-            self.model.uEmbeds.requires_grad = False
-            self.model.iEmbeds.detach()
-            self.model.iEmbeds.requires_grad = False
-        else:
-            self.model.ini_embeds.detach()
-            self.model.ini_embeds.requires_grad = False
+        # Freeze entire pretrained backbone — only GAIE encoder trains
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def reparameterize(self, mu, logvar):
         if self.training:
@@ -376,8 +370,8 @@ class GAIE(nn.Module):
             delta_emb = layer(delta_emb)
         # No raw +z skip: avoids uncontrolled shift magnitudes that hurt Recall
 
-        # Embedding correction
-        tuned_emb = self.ini_embeds + delta_emb
+        # Embedding correction (0.01 scale prevents init explosion)
+        tuned_emb = self.ini_embeds + 0.01 * delta_emb
 
         return tuned_emb, mu, logvar
 
@@ -550,15 +544,9 @@ class AIE(nn.Module):
         self.fnl_embeds.requires_grad = False
         self.model = model
 
-        # Freeze the pretrained recommendation model
-        if hasattr(self.model, "uEmbeds") and hasattr(self.model, "iEmbeds"):
-            self.model.uEmbeds.detach()
-            self.model.uEmbeds.requires_grad = False
-            self.model.iEmbeds.detach()
-            self.model.iEmbeds.requires_grad = False
-        else:
-            self.model.ini_embeds.detach()
-            self.model.ini_embeds.requires_grad = False
+        # Freeze entire pretrained backbone — only AIE encoder trains
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
         h = self.node_feats
@@ -577,8 +565,8 @@ class AIE(nn.Module):
         for layer in self.shift_mlp:
             delta_emb = layer(delta_emb)
 
-        # Embedding correction
-        tuned_emb = self.ini_embeds + delta_emb
+        # Embedding correction (0.01 scale prevents init explosion)
+        tuned_emb = self.ini_embeds + 0.01 * delta_emb
 
         return tuned_emb
 
