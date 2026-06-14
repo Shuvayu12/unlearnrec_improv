@@ -923,7 +923,7 @@ class CIE(nn.Module):
 
         self.model.training = True
         tuned_emb = self.forward(ori_adj, ts_pk_adj, mask, ts_drp_adj)
-        out_emb = self.model.forward(ts_pk_adj, tuned_emb)
+        out_emb = self.model.forward(ts_pk_adj, tuned_emb, keepRate=1.0)
         usr_embeds, itm_embeds = out_emb[:2]
 
         # Base recommendation loss (L_M)
@@ -1123,10 +1123,13 @@ class SimGCL(nn.Module):
         ancs = ancs.long().cuda()
         poss = poss.long().cuda()
         negs = negs.long().cuda()
-        self.train()
-        # print("###################cal_loss self.train########################")
-        # print(self.training)
-        usrEmbeds, itmEmbeds, pUsrEmbeds1, pItmEmbeds1, pUsrEmbeds2, pItmEmbeds2 = self.forward(ts_pk_adj, tuned_emb )
+        if args.ssl_reg > 0:
+            self.train()
+            usrEmbeds, itmEmbeds, pUsrEmbeds1, pItmEmbeds1, pUsrEmbeds2, pItmEmbeds2 = self.forward(ts_pk_adj, tuned_emb)
+        else:
+            self.eval()
+            usrEmbeds, itmEmbeds = self.forward(ts_pk_adj, tuned_emb)
+            pUsrEmbeds1 = pItmEmbeds1 = pUsrEmbeds2 = pItmEmbeds2 = t.zeros(1)
 
         ancEmbeds = usrEmbeds[ancs]
         posEmbeds = itmEmbeds[poss]
@@ -1141,7 +1144,7 @@ class SimGCL(nn.Module):
         else:
             regLoss = SimGCL_calcRegLoss_v3(ancEmbeds, posEmbeds)                 
 
-        contrastLoss = (contrast(pUsrEmbeds1, pUsrEmbeds2, ancs, args.temp) + contrast(pItmEmbeds1, pItmEmbeds2, poss, args.temp)) 
+        contrastLoss = (contrast(pUsrEmbeds1, pUsrEmbeds2, ancs, args.temp) + contrast(pItmEmbeds1, pItmEmbeds2, poss, args.temp)) if args.ssl_reg > 0 else t.tensor(0., device=usrEmbeds.device)
         # contrastLoss = 0
 
 
