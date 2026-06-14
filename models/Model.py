@@ -940,10 +940,18 @@ class CIE(nn.Module):
             unlearn_loss = cal_neg_aug_v2(usr_embeds[drp_edges[0]], itm_embeds[drp_edges[1]])
 
         # Alignment / preservation loss (L_p)
-        # CIE aligns to cf_embeds (clean-graph counterfactual), not fnl_embeds
-        # (fnl_embeds uses ts_ori_adj; cf_embeds uses ts_pk_adj same as usr_embeds)
-        tar_fnl_uEmbeds = self.cf_embeds[:args.user].detach()
-        tar_fnl_iEmbeds = self.cf_embeds[args.user:].detach()
+        # Compute live counterfactual from current ts_pk_adj — self.cf_embeds is frozen
+        # at init time, so after sim_epoch data reloads (adv_attack=False changes ts_pk_adj
+        # to random-drop graph) it no longer matches the graph usr_embeds uses, causing
+        # cross-graph InfoNCE → logsumexp Inf → gradient explosion → NaN weights.
+        with t.no_grad():
+            _prev_tr = self.model.training
+            self.model.training = False
+            _cf_u, _cf_i = self.model.forward(ts_pk_adj, keepRate=1.0)
+            self.model.training = _prev_tr
+            _cf_u, _cf_i = _cf_u.detach(), _cf_i.detach()
+        tar_fnl_uEmbeds = _cf_u
+        tar_fnl_iEmbeds = _cf_i
 
         # True causal alignment:
         # Deleted-edge nodes must align to cf_embeds (counterfactual target = do(e=0)).
@@ -974,10 +982,8 @@ class CIE(nn.Module):
         else:
             align_loss = t.tensor(0., device=ancs.device)
 
-        # cf_embeds = pretrained model run on post-deletion graph ts_pk_adj.
-        # This is the true do(e_ij=0) counterfactual for every node.
-        cf_tuned_u = self.cf_embeds[:args.user].detach()
-        cf_tuned_i = self.cf_embeds[args.user:].detach()
+        cf_tuned_u = _cf_u
+        cf_tuned_i = _cf_i
         tuned_u = tuned_emb[:args.user]
         tuned_i = tuned_emb[args.user:]
 
