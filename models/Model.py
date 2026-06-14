@@ -940,8 +940,10 @@ class CIE(nn.Module):
             unlearn_loss = cal_neg_aug_v2(usr_embeds[drp_edges[0]], itm_embeds[drp_edges[1]])
 
         # Alignment / preservation loss (L_p)
-        tar_fnl_uEmbeds = self.fnl_embeds[:args.user].detach()
-        tar_fnl_iEmbeds = self.fnl_embeds[args.user:].detach()
+        # CIE aligns to cf_embeds (clean-graph counterfactual), not fnl_embeds
+        # (fnl_embeds uses ts_ori_adj; cf_embeds uses ts_pk_adj same as usr_embeds)
+        tar_fnl_uEmbeds = self.cf_embeds[:args.user].detach()
+        tar_fnl_iEmbeds = self.cf_embeds[args.user:].detach()
 
         # True causal alignment:
         # Deleted-edge nodes must align to cf_embeds (counterfactual target = do(e=0)).
