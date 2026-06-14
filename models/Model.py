@@ -907,7 +907,7 @@ class CIE(nn.Module):
             delta_emb = layer(delta_emb)
 
         # Embedding correction
-        tuned_emb = self.ini_embeds + delta_emb
+        tuned_emb = self.ini_embeds + 0.01 * delta_emb
 
         return tuned_emb
 
