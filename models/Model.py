@@ -1130,7 +1130,7 @@ class SimGCL(nn.Module):
         negEmbeds = itmEmbeds[negs]
 
         scoreDiff = pairPredict(ancEmbeds, posEmbeds, negEmbeds)
-        bprLoss = - (scoreDiff).sigmoid().log().mean()
+        bprLoss = - ((scoreDiff).sigmoid() + 1e-10).log().mean()
         if args.reg_version == 'v1':
             regLoss = SimGCL_calcRegLoss(ancEmbeds, posEmbeds) 
         elif args.reg_version == 'v2':

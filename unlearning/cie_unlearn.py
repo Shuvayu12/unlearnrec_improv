@@ -154,7 +154,16 @@ class Coach:
             loss.backward()
             t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
 
-            assert t.isnan(loss).sum() == 0, print(loss)
+            if t.isnan(loss).any() or t.isinf(loss).any():
+                _comps = {
+                    'bpr': bpr_loss, 'reg': reg_loss, 'unlearn': unlearn_loss,
+                    'align': align_loss, 'contrast': contrast_loss, 'causal': causal_loss,
+                }
+                _bad = {k: v.item() for k, v in _comps.items()
+                        if t.isnan(v).any() or t.isinf(v).any()}
+                print(f'\n[cie] NaN/Inf at step {i}/{steps}: loss={loss.item()}  bad={_bad}')
+                self.opt.zero_grad()
+                continue
 
             self.opt.step()
 
