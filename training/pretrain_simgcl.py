@@ -89,9 +89,14 @@ class Coach:
         # self.save_history()
     
     def prepare_model(self):
-        # self.model = UnlearningMLP(self.handler).cuda()
-        # self.model = LightGCN(self.handler).cuda()
-        self.model = SimGCL(self.handler).cuda()
+        # Backbone dispatch: this coach pretrains any of the three backbones
+        # (their cal_loss/full_predict interfaces are identical).
+        if args.model == 'lightgcn':
+            self.model = LightGCN(self.handler).cuda()
+        elif args.model == 'sgl':
+            self.model = SGL().cuda()
+        else:
+            self.model = SimGCL(self.handler).cuda()
 
         # for name, params in self.model.named_parameters():
         #     if name=="param_fixed":

@@ -10,7 +10,11 @@ import torch_sparse as ts
 import random
 
 class DataHandler:
-    def __init__(self, adv_type=args.adv_method):
+    def __init__(self, adv_type=None):
+        # Resolve at call time: a default of args.adv_method would be frozen at
+        # import time and silently ignore later `args.adv_method = ...` in notebooks.
+        if adv_type is None:
+            adv_type = args.adv_method
         if args.data == 'ml1m':
             predir = './datasets/ml-1m' + '/'
         elif args.data == 'ml10m':
