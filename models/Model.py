@@ -1125,7 +1125,8 @@ class SimGCL(nn.Module):
         negEmbeds = itmEmbeds[negs]
 
         scoreDiff = pairPredict(ancEmbeds, posEmbeds, negEmbeds)
-        bprLoss = - (scoreDiff).sigmoid().log().mean()
+        # epsilon guard: sigmoid underflows to 0 for scoreDiff < ~-90 -> log(0) = -inf
+        bprLoss = - ((scoreDiff).sigmoid() + 1e-8).log().mean()
         if args.reg_version == 'v1':
             regLoss = SimGCL_calcRegLoss(ancEmbeds, posEmbeds) 
         elif args.reg_version == 'v2':
@@ -1248,6 +1249,9 @@ class SGL(nn.Module):
         ancs = ancs.long().cuda()
         poss = poss.long().cuda()
         negs = negs.long().cuda()
+        # full_predict sets self.training=False; restore it or forward returns the
+        # 2-tuple eval path and the 6-way unpack below fails (SimGCL does the same).
+        self.train()
         usrEmbeds, itmEmbeds, usrEmbeds1, itmEmbeds1, usrEmbeds2, itmEmbeds2 = self.forward(ts_pk_adj, iniEmbeds=tuned_emb ,keepRate = args.sglkeepRate)
         ancEmbeds = usrEmbeds[ancs]
         posEmbeds = itmEmbeds[poss]

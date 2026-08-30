@@ -142,7 +142,9 @@ class Coach:
             loss.backward()
             t.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
 
-            assert t.isnan(loss).sum() == 0, print(loss)
+            if t.isnan(loss).sum() != 0:
+                detail = {k: (float(v) if t.is_tensor(v) else v) for k, v in loss_dict.items()}
+                raise RuntimeError(f'[AIE] NaN loss at step {i}: components={detail}')
 
             self.opt.step()
 
