@@ -347,15 +347,9 @@ class GAIE(nn.Module):
         self.fnl_embeds.requires_grad = False
         self.model = model
 
-        # Freeze the pretrained recommendation model
-        if hasattr(self.model, "uEmbeds") and hasattr(self.model, "iEmbeds"):
-            self.model.uEmbeds.detach()
-            self.model.uEmbeds.requires_grad = False
-            self.model.iEmbeds.detach()
-            self.model.iEmbeds.requires_grad = False
-        else:
-            self.model.ini_embeds.detach()
-            self.model.ini_embeds.requires_grad = False
+        # Freeze entire pretrained backbone — only GAIE encoder trains
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def reparameterize(self, mu, logvar):
         if self.training:
@@ -376,8 +370,8 @@ class GAIE(nn.Module):
             delta_emb = layer(delta_emb)
         # No raw +z skip: avoids uncontrolled shift magnitudes that hurt Recall
 
-        # Embedding correction
-        tuned_emb = self.ini_embeds + delta_emb
+        # Embedding correction (0.01 scale prevents init explosion)
+        tuned_emb = self.ini_embeds + 0.01 * delta_emb
 
         return tuned_emb, mu, logvar
 
@@ -550,15 +544,9 @@ class AIE(nn.Module):
         self.fnl_embeds.requires_grad = False
         self.model = model
 
-        # Freeze the pretrained recommendation model
-        if hasattr(self.model, "uEmbeds") and hasattr(self.model, "iEmbeds"):
-            self.model.uEmbeds.detach()
-            self.model.uEmbeds.requires_grad = False
-            self.model.iEmbeds.detach()
-            self.model.iEmbeds.requires_grad = False
-        else:
-            self.model.ini_embeds.detach()
-            self.model.ini_embeds.requires_grad = False
+        # Freeze entire pretrained backbone — only AIE encoder trains
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
         h = self.node_feats
@@ -577,8 +565,8 @@ class AIE(nn.Module):
         for layer in self.shift_mlp:
             delta_emb = layer(delta_emb)
 
-        # Embedding correction
-        tuned_emb = self.ini_embeds + delta_emb
+        # Embedding correction (0.01 scale prevents init explosion)
+        tuned_emb = self.ini_embeds + 0.01 * delta_emb
 
         return tuned_emb
 
@@ -880,15 +868,9 @@ class CIE(nn.Module):
         self.cf_embeds.requires_grad = False
         self.model = model
 
-        # Freeze the pretrained recommendation model
-        if hasattr(self.model, "uEmbeds") and hasattr(self.model, "iEmbeds"):
-            self.model.uEmbeds.detach()
-            self.model.uEmbeds.requires_grad = False
-            self.model.iEmbeds.detach()
-            self.model.iEmbeds.requires_grad = False
-        else:
-            self.model.ini_embeds.detach()
-            self.model.ini_embeds.requires_grad = False
+        # Freeze entire pretrained backbone — only CIE own encoder trains
+        for param in self.model.parameters():
+            param.requires_grad = False
 
     def forward(self, ori_adj, ts_pk_adj, mask, ts_drp_adj):
         # GNN encode the influence graph with LayerNorm
@@ -907,7 +889,7 @@ class CIE(nn.Module):
             delta_emb = layer(delta_emb)
 
         # Embedding correction
-        tuned_emb = self.ini_embeds + delta_emb
+        tuned_emb = self.ini_embeds + 0.01 * delta_emb
 
         return tuned_emb
 
@@ -923,7 +905,7 @@ class CIE(nn.Module):
 
         self.model.training = True
         tuned_emb = self.forward(ori_adj, ts_pk_adj, mask, ts_drp_adj)
-        out_emb = self.model.forward(ts_pk_adj, tuned_emb)
+        out_emb = self.model.forward(ts_pk_adj, tuned_emb, keepRate=1.0)
         usr_embeds, itm_embeds = out_emb[:2]
 
         # Base recommendation loss (L_M)
@@ -940,8 +922,18 @@ class CIE(nn.Module):
             unlearn_loss = cal_neg_aug_v2(usr_embeds[drp_edges[0]], itm_embeds[drp_edges[1]])
 
         # Alignment / preservation loss (L_p)
-        tar_fnl_uEmbeds = self.fnl_embeds[:args.user].detach()
-        tar_fnl_iEmbeds = self.fnl_embeds[args.user:].detach()
+        # Compute live counterfactual from current ts_pk_adj — self.cf_embeds is frozen
+        # at init time, so after sim_epoch data reloads (adv_attack=False changes ts_pk_adj
+        # to random-drop graph) it no longer matches the graph usr_embeds uses, causing
+        # cross-graph InfoNCE → logsumexp Inf → gradient explosion → NaN weights.
+        with t.no_grad():
+            _prev_tr = self.model.training
+            self.model.training = False
+            _cf_u, _cf_i = self.model.forward(ts_pk_adj, keepRate=1.0)
+            self.model.training = _prev_tr
+            _cf_u, _cf_i = _cf_u.detach(), _cf_i.detach()
+        tar_fnl_uEmbeds = _cf_u
+        tar_fnl_iEmbeds = _cf_i
 
         # True causal alignment:
         # Deleted-edge nodes must align to cf_embeds (counterfactual target = do(e=0)).
@@ -972,10 +964,8 @@ class CIE(nn.Module):
         else:
             align_loss = t.tensor(0., device=ancs.device)
 
-        # cf_embeds = pretrained model run on post-deletion graph ts_pk_adj.
-        # This is the true do(e_ij=0) counterfactual for every node.
-        cf_tuned_u = self.cf_embeds[:args.user].detach()
-        cf_tuned_i = self.cf_embeds[args.user:].detach()
+        cf_tuned_u = _cf_u
+        cf_tuned_i = _cf_i
         tuned_u = tuned_emb[:args.user]
         tuned_i = tuned_emb[args.user:]
 
@@ -1115,17 +1105,20 @@ class SimGCL(nn.Module):
         ancs = ancs.long().cuda()
         poss = poss.long().cuda()
         negs = negs.long().cuda()
-        self.train()
-        # print("###################cal_loss self.train########################")
-        # print(self.training)
-        usrEmbeds, itmEmbeds, pUsrEmbeds1, pItmEmbeds1, pUsrEmbeds2, pItmEmbeds2 = self.forward(ts_pk_adj, tuned_emb )
+        if args.ssl_reg > 0:
+            self.train()
+            usrEmbeds, itmEmbeds, pUsrEmbeds1, pItmEmbeds1, pUsrEmbeds2, pItmEmbeds2 = self.forward(ts_pk_adj, tuned_emb)
+        else:
+            self.eval()
+            usrEmbeds, itmEmbeds = self.forward(ts_pk_adj, tuned_emb)
+            pUsrEmbeds1 = pItmEmbeds1 = pUsrEmbeds2 = pItmEmbeds2 = t.zeros(1)
 
         ancEmbeds = usrEmbeds[ancs]
         posEmbeds = itmEmbeds[poss]
         negEmbeds = itmEmbeds[negs]
 
         scoreDiff = pairPredict(ancEmbeds, posEmbeds, negEmbeds)
-        bprLoss = - (scoreDiff).sigmoid().log().mean()
+        bprLoss = - ((scoreDiff).sigmoid() + 1e-10).log().mean()
         if args.reg_version == 'v1':
             regLoss = SimGCL_calcRegLoss(ancEmbeds, posEmbeds) 
         elif args.reg_version == 'v2':
@@ -1133,7 +1126,7 @@ class SimGCL(nn.Module):
         else:
             regLoss = SimGCL_calcRegLoss_v3(ancEmbeds, posEmbeds)                 
 
-        contrastLoss = (contrast(pUsrEmbeds1, pUsrEmbeds2, ancs, args.temp) + contrast(pItmEmbeds1, pItmEmbeds2, poss, args.temp)) 
+        contrastLoss = (contrast(pUsrEmbeds1, pUsrEmbeds2, ancs, args.temp) + contrast(pItmEmbeds1, pItmEmbeds2, poss, args.temp)) if args.ssl_reg > 0 else t.tensor(0., device=usrEmbeds.device)
         # contrastLoss = 0
 
 
