@@ -286,6 +286,11 @@ class Coach:
             model_2_finetune = model_2_finetune + '.mod'
         ckp = t.load(model_2_finetune, weights_only=False)
         self.model = ckp['model']
+        if getattr(args, 'ft_tune_e0', False):
+            # Paper-faithful fine-tuning (UnlearnRec Alg. 1, line 10): unfreeze the
+            # 0-layer embeddings so they train alongside the encoder during
+            # fine-tuning, initialized from the checkpointed state.
+            self.model.ini_embeds = nn.Parameter(self.model.ini_embeds.detach().clone())
         self.opt = t.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=0)
 
 
