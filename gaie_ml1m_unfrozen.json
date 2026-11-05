@@ -1,0 +1,20 @@
+{
+  "pipeline": "gaie",
+  "seed": 1234,
+  "protocol": "attacked-backbone (UnlearnRec Sec 4.1.4)",
+  "results": {
+    "ml1m/lightgcn": {
+      "Recall": 0.22376797960806974,
+      "NDCG": 0.31579641863622404,
+      "MI_BF": 1.10979163646698,
+      "MI_NG": 0.7620808482170105,
+      "BeforeProb": 0.9633787274360657,
+      "AfterProb": 0.8680716753005981,
+      "NegProb": 0.6615408062934875,
+      "UnlearnTime": 1929.0562362670898,
+      "FinetuneTime": 1072.410795211792,
+      "BackboneRecall": 0.22237910063842073,
+      "BackboneNDCG": 0.31559053632722756
+    }
+  }
+}
