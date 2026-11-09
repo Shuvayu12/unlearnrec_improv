@@ -358,6 +358,9 @@ class GAIE(nn.Module):
             self.model.ini_embeds.requires_grad = False
 
     def reparameterize(self, mu, logvar):
+        # Deterministic-autoencoder ablation: Z = mu always, no sampling.
+        if getattr(args, 'gaie_deterministic', False):
+            return mu
         if self.training:
             std = t.exp(0.5 * logvar)
             eps = t.randn_like(std)
@@ -408,6 +411,10 @@ class GAIE(nn.Module):
         all_preds = t.cat([pos_preds, neg_preds])
         all_labels = t.cat([pos_labels, neg_labels])
         rec_loss = F.binary_cross_entropy_with_logits(all_preds, all_labels)
+
+        # Deterministic-autoencoder ablation: plain reconstruction, no KL prior.
+        if getattr(args, 'gaie_deterministic', False):
+            return rec_loss
 
         # KL divergence
         kl_loss = -0.5 * t.mean(1 + logvar - mu.pow(2) - logvar.exp())
@@ -516,6 +523,20 @@ class GATInfluenceLayer(nn.Module):
         return out
 
 
+class FixedPropInfluenceLayer(nn.Module):
+    """Ablation counterpart of GATInfluenceLayer: identical linear transform,
+    but influence propagates with the FIXED degree-normalized coefficients of
+    the (already symmetric-normalized) influence adjacency instead of learned
+    attention. Swapping this for GATInfluenceLayer isolates attention as the
+    only architectural variable (reviewer-required ablation)."""
+    def __init__(self, in_dim, out_dim):
+        super(FixedPropInfluenceLayer, self).__init__()
+        self.W = nn.Linear(in_dim, out_dim, bias=False)
+
+    def forward(self, adj, h):
+        return adj.matmul(self.W(h))
+
+
 class AIE(nn.Module):
     """Attention-Based Influence Encoder for machine unlearning.
 
@@ -530,12 +551,18 @@ class AIE(nn.Module):
         # Learnable input features for influence propagation
         self.node_feats = nn.Parameter(init(t.empty(num_nodes, args.latdim)))
 
-        # Multi-layer GAT encoder on the influence graph
+        # Multi-layer encoder on the influence graph: graph attention, or
+        # fixed degree-normalized propagation for the ablation.
         self.gat_layers = nn.ModuleList()
         for _ in range(args.gnn_layer):
-            self.gat_layers.append(
-                GATInfluenceLayer(args.latdim, args.latdim, negative_slope=0.2)
-            )
+            if getattr(args, 'aie_fixed_prop', False):
+                self.gat_layers.append(
+                    FixedPropInfluenceLayer(args.latdim, args.latdim)
+                )
+            else:
+                self.gat_layers.append(
+                    GATInfluenceLayer(args.latdim, args.latdim, negative_slope=0.2)
+                )
         self.layer_act = nn.ELU()
 
         # MLP shift generator

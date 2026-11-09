@@ -110,6 +110,10 @@ def ParseArgs():
 
 	parser.add_argument('--fineTune', default=True, type=str2bool, help='whether to start finetuning.')
 
+	# Architecture ablations (reviewer-required camera-ready setup)
+	parser.add_argument('--aie_fixed_prop', default=False, type=str2bool, help='AIE ablation: replace graph attention with fixed degree-normalized propagation (same linear transform, no learned coefficients).')
+	parser.add_argument('--gaie_deterministic', default=False, type=str2bool, help='GAIE ablation: deterministic autoencoder (Z = mu always, reconstruction kept, KL term dropped).')
+
 	# Leakage-free model selection (reviewer-required camera-ready setup)
 	parser.add_argument('--held_out_selection', default=False, type=str2bool, help='select checkpoints by MI-NG on a fixed held-out SIMULATED request instead of the actual request.')
 	parser.add_argument('--selection_seed', default=5678, type=int, help='seed for drawing the held-out selection request (independent of --seed).')
