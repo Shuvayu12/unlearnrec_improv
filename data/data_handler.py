@@ -130,7 +130,7 @@ class DataHandler:
 
 
     
-    def random_drop_edges(self, trn_mat, rate, adv_attack=False):
+    def random_drop_edges(self, trn_mat, rate, adv_attack=False, exclude_keys=None):
         # t.manual_seed(args.seed)
         # t.cuda.manual_seed_all(args.seed)
         # t.backends.cudnn.deterministic = True
@@ -141,11 +141,23 @@ class DataHandler:
         cols = trn_mat.col
         vals = trn_mat.data
         length = rows.shape[0]
-        
-        
-        rd_list = np.random.permutation(length)
-        picked_edges = rd_list[:int((1-rate)*length)]
-        droped_edges = rd_list[int((1-rate)*length):]
+
+        if exclude_keys is None:
+            rd_list = np.random.permutation(length)
+            picked_edges = rd_list[:int((1-rate)*length)]
+            droped_edges = rd_list[int((1-rate)*length):]
+        else:
+            # Leakage-safe simulation: excluded edges (e.g. the injected
+            # adversarial request) can never be sampled as simulated
+            # deletions; they always remain in the retained set.
+            keys = rows.astype(np.int64) * args.item + cols.astype(np.int64)
+            droppable = np.where(~np.isin(keys, exclude_keys))[0]
+            n_drop = min(int(rate * length), len(droppable))
+            rd_list = np.random.permutation(droppable)
+            droped_edges = rd_list[:n_drop]
+            drop_mask = np.zeros(length, dtype=bool)
+            drop_mask[droped_edges] = True
+            picked_edges = np.where(~drop_mask)[0]
 
         pk_rows = rows[picked_edges]
         pk_cols = cols[picked_edges]
@@ -167,7 +179,7 @@ class DataHandler:
 
         return pk_mat, mask, drp_mat,  (list(drp_rows), list(drp_cols)), ( list(pk_rows),  list(pk_cols)  )
 
-    def load_data(self, drop_rate=0.0, adv_attack=False):
+    def load_data(self, drop_rate=0.0, adv_attack=False, exclude_adv=False):
         ori_trn_mat = self._load_one_file(self.trn_file)
         tst_mat = self._load_one_file(self.tst_file, test_file=True)
 
@@ -182,7 +194,12 @@ class DataHandler:
             if adv_attack:
                 pk_trn_mat, self.mask,  self.drp_mat, self.dropped_edges, self.picked_edges = self.adversarial_edges_drop(ori_trn_mat, self.adv_edges)
             else:
-                pk_trn_mat, self.mask,  self.drp_mat, self.dropped_edges, self.picked_edges = self.random_drop_edges(ori_trn_mat ,drop_rate, False)
+                exclude_keys = None
+                if exclude_adv and hasattr(self, 'adv_edges'):
+                    adv_r = np.asarray(self.adv_edges[0], dtype=np.int64)
+                    adv_c = np.asarray(self.adv_edges[1], dtype=np.int64)
+                    exclude_keys = adv_r * args.item + adv_c
+                pk_trn_mat, self.mask,  self.drp_mat, self.dropped_edges, self.picked_edges = self.random_drop_edges(ori_trn_mat ,drop_rate, False, exclude_keys=exclude_keys)
 
             
             self.torch_uni_adj, self.torch_adj, self.ts_pk_adj = self._make_torch_adj(pk_trn_mat)

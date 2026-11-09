@@ -108,7 +108,12 @@ def ParseArgs():
 	# parser.add_argument('--keepRate', default=1.0, type=float, help='ratio of edges to keep')
      
 
-	parser.add_argument('--fineTune', default=True, type=str2bool, help='whether to start finetuning.')	
+	parser.add_argument('--fineTune', default=True, type=str2bool, help='whether to start finetuning.')
+
+	# Leakage-free model selection (reviewer-required camera-ready setup)
+	parser.add_argument('--held_out_selection', default=False, type=str2bool, help='select checkpoints by MI-NG on a fixed held-out SIMULATED request instead of the actual request.')
+	parser.add_argument('--selection_seed', default=5678, type=int, help='seed for drawing the held-out selection request (independent of --seed).')
+	parser.add_argument('--exclude_adv_from_sim', default=False, type=str2bool, help='exclude the injected adversarial (actual-request) edges from simulated deletion sampling.')
 
 	 
 	return parser.parse_args()

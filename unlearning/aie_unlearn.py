@@ -57,18 +57,35 @@ class Coach:
         topo_reses = self.tst_epoch(self.model)
         log(self.make_print('Topo', 0, topo_reses, False))
 
+        if getattr(args, 'held_out_selection', False):
+            self.sel_handler = self._build_selection_handler()
+
         for ep in range(stloc, args.epoch):
             if ep % args.sim_epoch == 0:
-                self.handler.load_data(drop_rate=args.test_drop_rate, adv_attack=args.adversarial_attack)
-                reses = self.tst_epoch(self.model)
-                print(f">>>>Recall: {reses['Recall']:.6f},  NDCG: {reses['NDCG']:.6f} @ Epoch: {ep}")
+                if getattr(args, 'held_out_selection', False):
+                    # Leakage-free selection: checkpoint by MI-NG on the fixed
+                    # held-out SIMULATED request; the actual request is never
+                    # consulted during training or selection.
+                    trn_handler = self.handler
+                    self.handler = self.sel_handler
+                    reses = self.tst_epoch(self.model)
+                    print(f">>>>[selection] Recall: {reses['Recall']:.6f},  NDCG: {reses['NDCG']:.6f} @ Epoch: {ep}")
+                    if reses['Recall'] < topo_reses['Recall'] * args.perf_degrade:
+                        print(f"WARNING: Recall {reses['Recall']:.4f} below threshold {topo_reses['Recall'] * args.perf_degrade:.4f}. Consider increasing align_wei or decreasing perf_degrade.")
+                    mi_result = self.test_unlearn(self.model, prefix='AIE selection (held-out simulated request):')
+                    self.handler = trn_handler
+                else:
+                    self.handler.load_data(drop_rate=args.test_drop_rate, adv_attack=args.adversarial_attack)
+                    reses = self.tst_epoch(self.model)
+                    print(f">>>>Recall: {reses['Recall']:.6f},  NDCG: {reses['NDCG']:.6f} @ Epoch: {ep}")
 
-                if reses['Recall'] < topo_reses['Recall'] * args.perf_degrade:
-                    print(f"WARNING: Recall {reses['Recall']:.4f} below threshold {topo_reses['Recall'] * args.perf_degrade:.4f}. Consider increasing align_wei or decreasing perf_degrade.")
+                    if reses['Recall'] < topo_reses['Recall'] * args.perf_degrade:
+                        print(f"WARNING: Recall {reses['Recall']:.4f} below threshold {topo_reses['Recall'] * args.perf_degrade:.4f}. Consider increasing align_wei or decreasing perf_degrade.")
 
-                mi_result = self.test_unlearn(self.model, prefix='AIE test:')
+                    mi_result = self.test_unlearn(self.model, prefix='AIE test:')
                 cur_gap = mi_result['mi_ng']
-                self.handler.load_data(drop_rate=args.pretrain_drop_rate, adv_attack=False)
+                self.handler.load_data(drop_rate=args.pretrain_drop_rate, adv_attack=False,
+                                       exclude_adv=getattr(args, 'exclude_adv_from_sim', False))
 
                 if cur_gap > global_score_gap:
                     self.save_history()
@@ -183,6 +200,26 @@ class Coach:
         ret['Recall'] = ep_recall / num
         ret['NDCG'] = ep_ndcg / num
         return ret
+
+    def _build_selection_handler(self):
+        """Fixed held-out SIMULATED deletion request used only for checkpoint
+        selection. Size-matched to the actual request, drawn once with a
+        dedicated seed (--selection_seed), and with the actual request's edges
+        excluded from the draw, so model selection never observes the
+        evaluation target (camera-ready requirement: no actual-request
+        selection leakage)."""
+        if hasattr(self.handler, 'adv_edges'):
+            sel_rate = len(self.handler.adv_edges[0]) / self.handler.edges_num
+        else:
+            sel_rate = args.test_drop_rate
+        sel_handler = DataHandler()
+        np.random.seed(getattr(args, 'selection_seed', 5678))
+        sel_handler.load_data(drop_rate=sel_rate, adv_attack=False, exclude_adv=True)
+        np.random.seed(args.seed)
+        print(f"[held-out selection] fixed simulated request: "
+              f"{len(sel_handler.dropped_edges[0])} edges (rate {sel_rate:.5f}); "
+              f"actual-request edges excluded from the draw")
+        return sel_handler
 
     def test_unlearn(self, model, prefix=''):
         handler = self.handler
